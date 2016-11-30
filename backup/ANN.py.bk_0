@@ -1,0 +1,108 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+#
+# Copyright © 2016 Vincent <Vincent@Vincents-MacBook-Air.local>
+#
+# Distributed under terms of the MIT license.
+
+"""
+A simple Neural Network have 1 input layer, 1 hidden layer, 1 prediction layer
+to recognise MNIST dataset
+"""
+from __future__ import division, print_function, absolute_import  
+import time
+
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.examples.tutorials.mnist import input_data
+
+# build the layer add function
+def add_layer(x, W, b, activation_function=None):
+    """TODO: function to add a layer 
+
+    :x: input data
+    :activation_function: the activation function using in added layer, default is None means linear function
+    :returns: output data
+
+    """
+    Wx_plus_b = tf.add(tf.matmul(x, W), b)
+    if activation_function is None:
+        outputs = Wx_plus_b
+    else:
+        outputs = activation_function(Wx_plus_b)
+    return outputs
+
+# import dataset
+mnist = input_data.read_data_sets("../DataSet/MNIST_data/", one_hot=True)
+trX, trY, teX, teY = mnist.train.images, mnist.train.labels, mnist.test.images, mnist.test.labels
+
+# parameters
+learning_rate = 0.1
+training_epochs = 3
+batch_size = 128
+display_step = 1
+
+# Network Parameters
+n_input = 784 # MNIST data input
+n_hidden_1 = 256 # 1st hidden layer num feature
+
+# initial weights and bias
+# set seed = 1
+weights = {
+    'hl_1' : tf.Variable(tf.random_normal([n_input, n_hidden_1], stddev=0.01, seed=1)),
+    'pred' : tf.Variable(tf.random_normal([n_hidden_1, 10], stddev=0.01, seed=1)),
+        }
+bias = {
+    'hl_1' : tf.Variable(tf.zeros([1, n_hidden_1])+0.1),
+    'pred' : tf.Variable(tf.zeros([1, 10])+0.1),
+        }
+
+# hold the input
+X = tf.placeholder(tf.float32, [None, n_input])
+Y = tf.placeholder(tf.float32, [None, 10])
+
+# add one hidden layer
+hl_1 = add_layer(X, weights['hl_1'], bias['hl_1'], activation_function=tf.nn.relu)
+# add one prediction layer
+pred = add_layer(hl_1, weights['pred'], bias['pred'], activation_function = None)
+
+# loss function
+loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, Y)) # classfication
+train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
+predict_op = tf.argmax(pred, 1)
+
+# initialize the Variable
+init = tf.initialize_all_variables()
+# start to train
+with tf.Session() as sess:
+    all_start = time.time()
+    sess.run(init)
+    # training cycle
+    avg_loss = [None]*training_epochs
+    num_batch = int(len(trX)/batch_size)
+    for epoch in range(training_epochs):
+        avg_loss[epoch] = 0.
+        # compute by batch
+        for i in range(num_batch):
+            # run train op and loss op to get loss value
+            start, end = batch_size*i, batch_size*(i+1)
+            _, l = sess.run([train_op, loss], feed_dict={X: trX[start:end], Y: trY[start:end]})
+            # compute average loss in each epoch
+            avg_loss[epoch] += l / num_batch
+        # report
+        if epoch % display_step == 0:
+            test_MSE = np.mean(np.argmax(teY, axis=1) == sess.run(predict_op, feed_dict={X:teX, Y:teY}))
+            # report test MSE
+            print("Epoch:", '%04d, ' % (epoch+1), 
+                    "Loss:", "{:.9f}, ".format(avg_loss[epoch]))
+                    #"test_MSE:", "{:.9f}".format(test_MSE))
+    all_end = time.time()
+    print("Optimization Finished!   Time cost:{:.3f}".format(all_end-all_start))
+
+    plt.plot(range(training_epochs), avg_loss, linewidth=2)
+    plt.show()
+    plt.waitforbuttonpress()
+
+

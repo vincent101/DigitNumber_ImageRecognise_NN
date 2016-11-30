@@ -1,0 +1,227 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+# vim:fenc=utf-8
+#
+# Copyright © 2016 Vincent <Vincent@Vincents-MacBook-Air.local>
+#
+# Distributed under terms of the MIT license.
+
+"""
+A simple Neural Network have 1 input layer, 1 hidden layer, 1 prediction layer
+to recognise MNIST dataset
+"""
+from __future__ import division, print_function, absolute_import  
+import os
+import argparse
+import time
+import pickle
+
+import tensorflow as tf
+import numpy as np
+from tensorflow.examples.tutorials.mnist import input_data
+
+def main():
+    """TODO: Import MNIST data and parameters for train
+
+    """
+    global trX, trY, vaX, vaY, teX, teY, output_file
+    # import dataset
+    mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
+    trX, trY, vaX, vaY, teX, teY = mnist.train.images, mnist.train.labels, mnist.validation.images, mnist.validation.labels, mnist.test.images, mnist.test.labels
+    _, size_tr = trX.shape
+
+    # add parameters
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--size_input", type=int, default=size_tr)
+    parser.add_argument('--display_step', type=int, default=100,
+            help="e.g. --display_step '1' ")
+    # parameters control hidden layers
+    parser.add_argument('--size_hidden_layers', default=(256,),
+            help="e.g. --size_hidden_layer '[(256,),(128,)]' or '(256,)' ")
+    parser.add_argument("--activation_function", default=("tf.nn.relu","tf.nn.relu"),
+            help="e.g. --activation_function '[(\"tf.nn.relu\",),(\"tf.sigmoid\",)]' or '(\"tf.nn.relu\",)'")
+    parser.add_argument("--pred_activation_function", default=None,
+            help="e.g. --pred_activation_function '[(\"tf.nn.dropout\",),None]' or '(\"tf.nn.dropout\",)'")
+    # parameters control learning
+    parser.add_argument('--learning_rate', default=0.05,
+            help="e.g. --learning_rate '[0.1, 0.05]' or '0.1' ")
+    parser.add_argument('--training_epochs', default=801,
+            help="e.g. --training_epoch '[3, 10]' or '3' ")
+    parser.add_argument('--batch_size', default=128,
+            help="e.g. --batch_size '[128, 256]' or '128' ")
+    
+    # check if there are some parameter need to be test
+    args = parser.parse_args()
+    # open output_file
+    output_file = open('data/data.pkl', 'wb')
+
+    # call train
+    flag = 0
+    for i in args.__dict__:
+        # try to remove the ' ' of each value
+        try:
+            args.__dict__[i] = eval(args.__dict__[i])
+        except:
+            continue
+        # check if there are values in the list of tested parameter
+        if type(args.__dict__[i]) == list:
+            # if there are, use new parameter gourp in several times
+            flag = 1
+            for j in args.__dict__[i]:
+                arg = args
+                arg = parser.parse_args(['--'+str(i), str(j)])
+                # try to remove the ' ' of each value
+                for k in arg.__dict__:
+                    try:
+                        arg.__dict__[k] = eval(arg.__dict__[k])
+                    except:
+                        continue
+                print(arg)
+                #print(arg, args.__dict__[i], j)
+                tmp1, tmp2 = train(arg)
+                restore_res(arg, tmp1, tmp2)
+
+    # if no parameter need to be test
+    if flag == 0:
+        arg = args
+        print(arg)
+        tmp1, tmp2 = train(arg)
+        restore_res(arg, tmp1, tmp2)
+
+    # close output_file
+    output_file.close()
+
+    return 0
+
+# build the function used for train model, give loss and plot
+def train(args):
+    """TODO: Docstring for train.
+    :args: parameters
+
+    """
+    # hold the input
+    X = tf.placeholder(tf.float32, [None, args.size_input])
+    Y = tf.placeholder(tf.float32, [None, 10])
+    global keep_prob
+    keep_prob = tf.placeholder("float32")
+
+    # check the type of parameters
+    args.learning_rate = float(args.learning_rate)
+    args.training_epochs = int(args.training_epochs)
+    args.batch_size = int(args.batch_size)
+    # check the number of hidden layers
+    if type(args.size_hidden_layers) == str:
+        args.size_hidden_layers = eval(args.size_hidden_layers)
+    if type(args.activation_function) == str:
+        args.activation_function = eval(args.activation_function)
+    if type(args.pred_activation_function) == str:
+        args.pred_activation_function = eval(args.pred_activation_function)
+    if len(args.size_hidden_layers) == len(args.activation_function):
+        num_hidden_layers = len(args.size_hidden_layers)
+    else:
+        num_hidden_layers = min(len(args.activation_function),len(args.size_hidden_layers))
+    
+    # initial weights and bias
+    # set seed = 1
+    weights = {
+        'hl_0' : tf.Variable(tf.random_normal([args.size_input, args.size_hidden_layers[0]], stddev=0.01, seed=1)),
+        #'hl_1' : tf.Variable(tf.random_normal([args.size_hidden_layers[0], args.size_hidden_layers[1]], stddev=0.01, seed=1)),
+        'pred' : tf.Variable(tf.random_normal([args.size_hidden_layers[num_hidden_layers-1], 10], stddev=0.01, seed=1)),
+            }
+    bias = {
+        'hl_0' : tf.Variable(tf.zeros([1, args.size_hidden_layers[0]])+0.1),
+        #'hl_1' : tf.Variable(tf.zeros([1, args.size_hidden_layers[1]])+0.1),
+        'pred' : tf.Variable(tf.zeros([1, 10])+0.1),
+            }
+    
+    # add the hidden layer 1
+    exec("hl_0 = add_layer(X, weights['hl_0'], bias['hl_0'], activation_function="+args.activation_function[0]+")")
+    #hl_1 = add_layer(hl_0, weights['hl_1'], bias['hl_1'], activation_function=args.activation_function[1])
+
+    # add after hidden layers with its weight and bias
+    for item in range(1,num_hidden_layers):
+        tmp_1, tmp = 'hl_'+str(item-1), 'hl_'+str(item)
+        exec("weights['"+tmp+"']=tf.Variable(tf.random_normal([args.size_hidden_layers[item-1], args.size_hidden_layers[item]], stddev=0.01, seed=1))")
+        exec("bias['"+tmp+"']=tf.Variable(tf.zeros([1, args.size_hidden_layers[item]])+0.1)")
+        exec(tmp+"= add_layer("+tmp_1+", weights['"+tmp+"'], bias['"+tmp+"'], activation_function="+args.activation_function[item]+")")
+
+    # add the prediction layer
+    #pred = add_layer(hl_1, weights['pred'], bias['pred'], activation_function = None)
+    if args.pred_activation_function == None:
+        exec("pred = add_layer(hl_"+str(num_hidden_layers-1)+", weights['pred'], bias['pred'], activation_function = None)")
+    else:
+        exec("pred = add_layer(hl_"+str(num_hidden_layers-1)+", weights['pred'], bias['pred'], activation_function="+args.pred_activation_function[0]+",k_p=True)")
+    # for prediction layer: activation function = tf.nn.dropout 
+    
+    # loss function
+    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, Y)) # classfication
+    train_op = tf.train.GradientDescentOptimizer(args.learning_rate).minimize(loss)
+    predict_op = tf.argmax(pred, 1)
+    #predict_op = tf.softmax(pred)
+    
+    # initialize the Variable
+    init = tf.initialize_all_variables()
+    # start to train
+    with tf.Session() as sess:
+        all_start = time.time()
+        sess.run(init)
+        # training cycle
+        avg_loss = [None]*args.training_epochs
+        validation_acc = [None]*args.training_epochs
+        num_batch = int(len(trX)/args.batch_size)
+        for epoch in range(args.training_epochs):
+            avg_loss[epoch] = 0.
+            # compute by batch
+            for i in range(num_batch):
+                # run train op and loss op to get loss value
+                start, end = args.batch_size*i, args.batch_size*(i+1)
+                _, l = sess.run([train_op, loss], feed_dict={X: trX[start:end], Y: trY[start:end], keep_prob: 0.5})
+                # compute average loss in each epoch
+                avg_loss[epoch] += l / num_batch
+            validation_acc[epoch] = np.mean(np.argmax(vaY, axis=1) == sess.run(predict_op, feed_dict={X:vaX, keep_prob:1.0}))
+            # report
+            if epoch % args.display_step == 0:
+                # report validation acc
+                print("Epoch:", "%04d, " % (epoch+1), 
+                        "Loss:", "{:.9f}, ".format(avg_loss[epoch]),
+                        "Validation Accuracy:", "{:.9f}".format(validation_acc[epoch]))
+        test_acc = np.mean(np.argmax(teY, axis=1) == sess.run(predict_op, feed_dict={X:teX, keep_prob:1.0}))
+        all_end = time.time()
+        print("Optimization Finished! ",
+                #"Test accuracy:","{:.9f} ".format(test_acc),
+                "Time cost: {:.3f}".format(all_end-all_start))
+
+    return avg_loss, validation_acc
+
+# build the layer add function
+def add_layer(x, W, b, activation_function=None, k_p=False):
+    """TODO: function to add a layer 
+    :x: input data
+    :activation_function: the activation function using in added layer, default is None means linear function
+    :returns: output data
+
+    """
+    Wx_plus_b = tf.add(tf.matmul(x, W), b)
+    if activation_function is None:
+        outputs = Wx_plus_b
+    else:
+        if k_p is False:
+            outputs = activation_function(Wx_plus_b)
+        else:
+            outputs = activation_function(Wx_plus_b,keep_prob)
+    return outputs
+
+def restore_res(arg, avg_loss, validation_accuracy):
+    """TODO: Docstring for restore_res.
+
+    :arg: the parameters
+    :returns: 0
+
+    """
+    arg.__dict__['avg_loss'] = avg_loss
+    arg.__dict__['validation_accuracy'] = validation_accuracy
+    pickle.dump(arg.__dict__, output_file)
+    return 0
+
+if __name__=="__main__":
+    main()
